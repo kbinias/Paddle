@@ -17,9 +17,10 @@ import numpy as np
 from .. import core
 from ..framework import Program
 from ..executor import global_scope
+from base_transpiler import BaseTranspiler
 
 
-class InferenceTranspiler(object):
+class InferenceTranspiler(BaseTranspiler):
     '''
     Convert the fluid program to optimized inference program.
 
@@ -57,8 +58,12 @@ class InferenceTranspiler(object):
             scope = global_scope()
         if not isinstance(scope, core.Scope):
             raise TypeError("scope should be as Scope type or None")
-        self.fuse_batch_norm(program, place, scope)
-        self.fuse_relu_mkldnn(program)
+
+        use_mkldnn = bool(os.getenv("FLAGS_use_mkldnn", False))
+        if not use_mkldnn:
+            self.fuse_batch_norm(program, place, scope)
+        else:
+            self.fuse_relu_mkldnn(program)
 
     def fuse_relu_mkldnn(self, program):
         '''
@@ -80,10 +85,6 @@ class InferenceTranspiler(object):
         :param program: program to transpile
         :type program: Program
         '''
-        use_mkldnn = bool(os.getenv("FLAGS_use_mkldnn", False))
-        if not use_mkldnn:
-            return
-
         self.block = program.block(0)
 
         i = 0
@@ -293,18 +294,3 @@ class InferenceTranspiler(object):
                 if input_arg in self.input_map:
                     current_op.rename_input(input_arg,
                                             self.input_map[input_arg])
-
-    def _remove_unused_var(self):
-        '''
-        remove unused varibles in program
-        '''
-        args = []
-        for i in range(len(self.block.ops)):
-            current_op = self.block.ops[i]
-            args += current_op.input_arg_names
-            args += current_op.output_arg_names
-        args = list(set(args))  # unique the input and output arguments
-
-        for var in self.block.vars.keys():
-            if var not in args:
-                self.block._remove_var(var)
